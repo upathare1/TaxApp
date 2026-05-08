@@ -179,7 +179,7 @@ const calculateCoreResults = (
     0
   )
   const longTermTaxableIncome = longTermCapitalGains
-  const netInvestmentTaxableIncome = interestIncome
+  const grossNetInvestmentIncome = interestIncome
     + otherInvestmentIncome
     + longTermCapitalGains
     + shortTermCapitalGains
@@ -218,6 +218,15 @@ const calculateCoreResults = (
   const longTermTax = longTermTaxableIncome * longTermTaxRate
   const stateTax = Math.min(massachusettsTaxableIncome, massachusettsSurtaxFloor) * 0.05
     + Math.max(massachusettsTaxableIncome - massachusettsSurtaxFloor, 0) * 0.09
+  const netInvestmentThresholdIncome = federalOrdinaryIncome
+    + longTermTaxableIncome
+    + interestIncome
+    + shortTermCapitalGains
+    + otherInvestmentIncome
+  const netInvestmentTaxableIncome = Math.min(
+    grossNetInvestmentIncome,
+    Math.max(netInvestmentThresholdIncome - 200000, 0)
+  )
   const netInvestmentIncomeTax = netInvestmentTaxableIncome * 0.038
   const totalTax = federalTax + stateTax + ficaTax + netInvestmentIncomeTax + longTermTax
   const netIncome = totalIncome
