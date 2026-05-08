@@ -1289,7 +1289,7 @@ const importInputs = async (event: Event) => {
                 <div class="border-t border-default pt-4">
                   <dt class="flex items-center gap-1 text-sm font-medium text-muted">
                     <span>Net Income</span>
-                    <UTooltip text="All income minus taxable benefits, contributions, and health insurance.">
+                    <UTooltip text="All income minus taxes, taxable benefits, contributions, and health insurance.">
                       <UButton
                         icon="i-lucide-circle-help"
                         color="neutral"
@@ -1308,7 +1308,7 @@ const importInputs = async (event: Event) => {
                 <div>
                   <dt class="flex items-center gap-1 text-sm font-medium text-muted">
                     <span>Net Wage Income</span>
-                    <UTooltip text="All income minus taxable benefits, contributions, health insurance, and (gross) investment income.">
+                    <UTooltip text="All income minus taxes, taxable benefits, contributions, health insurance, and (gross) investment income.">
                       <UButton
                         icon="i-lucide-circle-help"
                         color="neutral"
