@@ -42,12 +42,6 @@ interface OptionalDeductionInput {
   icon: string
 }
 
-interface TaxBracket {
-  from: number
-  to?: number
-  rate: number
-}
-
 interface ConfigTaxBracket {
   from: number
   to?: number
@@ -61,13 +55,44 @@ interface CalculatorConfig {
   federalTaxBrackets: ConfigTaxBracket[]
 }
 
-interface MarginalIncomeDeltas {
-  wageIncome?: number
-  otherInvestmentIncome?: number
-  longTermCapitalGains?: number
+type NumberInputValue = string | number
+
+interface CalculationPayload {
+  income: Record<IncomeKey, number | undefined>
+  adjustments: Record<AdjustmentKey, number | undefined>
+  optionalDeductions: Record<OptionalDeductionKey, number>
+  interestBreakdown: {
+    stateTaxExempt: number
+    notStateTaxExempt: number
+  }
+  hsaBreakdown: {
+    employeeContributions: number
+    employerContributions: number
+  }
+  calculatorConfig: CalculatorConfig
 }
 
-type NumberInputValue = string | number
+interface CalculationResults {
+  federalOrdinaryIncome: number
+  ficaWage: number
+  massachusettsTaxableIncome: number
+  longTermTaxableIncome: number
+  netInvestmentTaxableIncome: number
+  federalTax: number
+  ficaTax: number
+  stateTax: number
+  longTermTax: number
+  netInvestmentIncomeTax: number
+  totalTax: number
+  retirement401kContributions: number
+  hsaEmployeeContributionAmount: number
+  effectiveTaxRate: number
+  marginalTaxRateWageIncome: number
+  marginalTaxRateInvestmentIncome: number
+  marginalTaxRateLongTermIncome: number
+  netIncome: number
+  netIncomeMinusInvestmentIncome: number
+}
 
 const incomeInputs: IncomeInput[] = [
   {
@@ -169,9 +194,6 @@ const optionalDeductionInputs: OptionalDeductionInput[] = [
   }
 ]
 
-const massachusettsPersonalExemption = 4400
-const longTermTaxZeroRateThreshold = 49450
-const longTermTaxFifteenRateThreshold = 545500
 const defaultCalculatorConfig: CalculatorConfig = {
   federalStandardDeduction: 16100,
   massachusettsSurtaxFloor: 1107750,
@@ -225,6 +247,29 @@ const calculatorAssumptionsExpanded = ref(false)
 const interestStateTaxExempt = ref<number | undefined>(undefined)
 const hsaEmployerContributions = ref<number | undefined>(undefined)
 const importInput = ref<HTMLInputElement | null>(null)
+const calculationError = ref<string | null>(null)
+const defaultCalculationResults: CalculationResults = {
+  federalOrdinaryIncome: 0,
+  ficaWage: 0,
+  massachusettsTaxableIncome: 0,
+  longTermTaxableIncome: 0,
+  netInvestmentTaxableIncome: 0,
+  federalTax: 0,
+  ficaTax: 0,
+  stateTax: 0,
+  longTermTax: 0,
+  netInvestmentIncomeTax: 0,
+  totalTax: 0,
+  retirement401kContributions: 0,
+  hsaEmployeeContributionAmount: 0,
+  effectiveTaxRate: 0,
+  marginalTaxRateWageIncome: 0,
+  marginalTaxRateInvestmentIncome: 0,
+  marginalTaxRateLongTermIncome: 0,
+  netIncome: 0,
+  netIncomeMinusInvestmentIncome: 0
+}
+const calculationResults = ref<CalculationResults>({ ...defaultCalculationResults })
 
 const normalizeAmount = (value: number | undefined) => Math.max(value ?? 0, 0)
 const clampAmount = (value: number | undefined, max: number) => Math.min(normalizeAmount(value), max)
@@ -303,14 +348,6 @@ const formatPercent = (value: number) =>
     maximumFractionDigits: 2
   }).format(value)
 
-const federalOrdinaryTaxBrackets = computed<TaxBracket[]>(() =>
-  calculatorConfig.federalTaxBrackets.map(bracket => ({
-    from: normalizeAmount(bracket.from),
-    to: bracket.to === undefined ? undefined : normalizeAmount(bracket.to),
-    rate: normalizeAmount(bracket.ratePercent) / 100
-  }))
-)
-
 const resetCalculatorConfig = () => {
   calculatorConfig.federalStandardDeduction = defaultCalculatorConfig.federalStandardDeduction
   calculatorConfig.massachusettsSurtaxFloor = defaultCalculatorConfig.massachusettsSurtaxFloor
@@ -339,17 +376,6 @@ const removeFederalTaxBracket = (index: number) => {
   calculatorConfig.federalTaxBrackets.splice(index, 1)
 }
 
-const calculateProgressiveTax = (taxableIncome: number, brackets: TaxBracket[]) => {
-  const incomeAmount = Math.max(taxableIncome, 0)
-
-  return brackets.reduce((tax, bracket) => {
-    const bracketTop = bracket.to ?? incomeAmount
-    const taxableInBracket = Math.max(Math.min(incomeAmount, bracketTop) - bracket.from, 0)
-
-    return tax + taxableInBracket * bracket.rate
-  }, 0)
-}
-
 const optionalDeductionTotalPlaceholder = computed(() => {
   const mortgageInterest = optionalDeductions.mortgageInterest
   const propertyTaxes = optionalDeductions.propertyTaxes
@@ -362,306 +388,53 @@ const optionalDeductionTotalPlaceholder = computed(() => {
   return mortgageInterest + propertyTaxes + stateTaxesWithholding + investmentExpenses + massachusettsRent + carryOverCapitalLoss
 })
 
-const grossIncome = computed(() => {
-  const wageIncome = income.wageIncome ?? 0
-  const taxableBenefits = income.taxableBenefits ?? 0
-  const interestIncome = income.interestIncome ?? 0
-  const shortTermCapitalGains = income.shortTermCapitalGains ?? 0
-  const otherInvestmentIncome = income.otherInvestmentIncome ?? 0
+const calculationPayload = computed<CalculationPayload>(() => ({
+  income: { ...income },
+  adjustments: { ...adjustments },
+  optionalDeductions: { ...optionalDeductions },
+  interestBreakdown: {
+    stateTaxExempt: stateTaxExemptInterest.value,
+    notStateTaxExempt: notStateTaxExemptInterest.value
+  },
+  hsaBreakdown: {
+    employeeContributions: hsaEmployeeContributionAmount.value,
+    employerContributions: hsaEmployerContributionAmount.value
+  },
+  calculatorConfig: {
+    federalStandardDeduction: calculatorConfig.federalStandardDeduction,
+    massachusettsSurtaxFloor: calculatorConfig.massachusettsSurtaxFloor,
+    socialSecurityMaximumTaxableWage: calculatorConfig.socialSecurityMaximumTaxableWage,
+    federalTaxBrackets: calculatorConfig.federalTaxBrackets.map(bracket => ({ ...bracket }))
+  }
+}))
 
-  return wageIncome + taxableBenefits + interestIncome + shortTermCapitalGains + otherInvestmentIncome
-})
+let calculationRequestId = 0
 
-const federalOrdinaryIncome = computed(() => {
-  const retirement401kContributions = adjustments.retirement401kContributions ?? 0
-  const healthInsurancePayments = adjustments.healthInsurancePayments ?? 0
-  const investmentExpenses = optionalDeductions.investmentExpenses
-  const stateTaxesWithholding = optionalDeductions.stateTaxesWithholding
-  const propertyTaxes = optionalDeductions.propertyTaxes
-  const mortgageInterest = optionalDeductions.mortgageInterest
-  const carryOverCapitalLoss = optionalDeductions.carryOverCapitalLoss
-  const longTermCapitalGains = income.longTermCapitalGains ?? 0
-  const shortTermCapitalGains = income.shortTermCapitalGains ?? 0
-  const stateAndPropertyTaxDeduction = Math.min(stateTaxesWithholding + propertyTaxes, 40000)
-  const itemizedOrStandardDeduction = Math.max(
-    calculatorConfig.federalStandardDeduction,
-    stateAndPropertyTaxDeduction + mortgageInterest
-  )
-  const capitalLossDeduction = Math.min(
-    3000,
-    Math.max(0, carryOverCapitalLoss - (longTermCapitalGains + shortTermCapitalGains))
-  )
+watch(
+  calculationPayload,
+  async (payload) => {
+    const requestId = ++calculationRequestId
 
-  const taxableIncome = grossIncome.value
-    - retirement401kContributions
-    - hsaEmployeeContributionAmount.value
-    - investmentExpenses
-    - healthInsurancePayments
-    - itemizedOrStandardDeduction
-    - capitalLossDeduction
+    try {
+      const results = await $fetch<CalculationResults>('/api/calculate', {
+        method: 'POST',
+        body: payload
+      })
 
-  return Math.max(taxableIncome, 0)
-})
-
-const longTermTaxableIncome = computed(() => income.longTermCapitalGains ?? 0)
-
-const netInvestmentTaxableIncome = computed(() => {
-  const interestIncome = income.interestIncome ?? 0
-  const otherInvestmentIncome = income.otherInvestmentIncome ?? 0
-  const longTermCapitalGains = income.longTermCapitalGains ?? 0
-  const shortTermCapitalGains = income.shortTermCapitalGains ?? 0
-
-  return interestIncome + otherInvestmentIncome + longTermCapitalGains + shortTermCapitalGains
-})
-
-const ficaWage = computed(() => {
-  const wageIncome = income.wageIncome ?? 0
-  const taxableBenefits = income.taxableBenefits ?? 0
-  const healthInsurancePayments = adjustments.healthInsurancePayments ?? 0
-
-  return Math.max(
-    wageIncome + taxableBenefits - hsaEmployeeContributionAmount.value - healthInsurancePayments,
-    0
-  )
-})
-
-const ficaTax = computed(() => {
-  const ficaTaxableIncome = ficaWage.value
-
-  return Math.min(calculatorConfig.socialSecurityMaximumTaxableWage * 0.062, 0.062 * ficaTaxableIncome)
-    + 0.0145 * ficaTaxableIncome
-    + 0.009 * Math.max(ficaTaxableIncome - 200000, 0)
-})
-
-const massachusettsTaxableIncome = computed(() => {
-  const retirement401kContributions = adjustments.retirement401kContributions ?? 0
-  const healthInsurancePayments = adjustments.healthInsurancePayments ?? 0
-  const investmentExpenses = optionalDeductions.investmentExpenses
-  const massachusettsRent = optionalDeductions.massachusettsRent
-  const carryOverCapitalLoss = optionalDeductions.carryOverCapitalLoss
-  const longTermCapitalGains = income.longTermCapitalGains ?? 0
-  const shortTermCapitalGains = income.shortTermCapitalGains ?? 0
-  const capitalLossAfterGains = Math.max(
-    carryOverCapitalLoss - (longTermCapitalGains + shortTermCapitalGains),
-    0
-  )
-  const interestCapitalLossDeduction = Math.min(
-    notStateTaxExemptInterest.value,
-    capitalLossAfterGains,
-    2000
-  )
-
-  const taxableIncome = grossIncome.value
-    + longTermTaxableIncome.value
-    - retirement401kContributions
-    - hsaEmployeeContributionAmount.value
-    - healthInsurancePayments
-    - investmentExpenses
-    - Math.min(massachusettsRent, 3000)
-    - Math.min(ficaTax.value, 2000)
-    - massachusettsPersonalExemption
-    - interestCapitalLossDeduction
-    - stateTaxExemptInterest.value
-
-  return Math.max(taxableIncome, 0)
-})
-
-const federalTax = computed(() =>
-  calculateProgressiveTax(federalOrdinaryIncome.value, federalOrdinaryTaxBrackets.value)
+      if (requestId === calculationRequestId) {
+        calculationResults.value = results
+        calculationError.value = null
+      }
+    } catch (error) {
+      if (requestId === calculationRequestId) {
+        console.error(error)
+        calculationResults.value = { ...defaultCalculationResults }
+        calculationError.value = 'Calculations are temporarily unavailable.'
+      }
+    }
+  },
+  { immediate: true }
 )
-
-const longTermTax = computed(() => {
-  const federalIncome = federalOrdinaryIncome.value
-  const longTermIncome = longTermTaxableIncome.value
-
-  if (federalIncome <= longTermTaxZeroRateThreshold) {
-    return longTermIncome * 0
-  }
-
-  if (federalIncome <= longTermTaxFifteenRateThreshold) {
-    return longTermIncome * 0.15
-  }
-
-  return longTermIncome * 0.20
-})
-
-const stateTax = computed(() => {
-  const taxableIncome = Math.max(massachusettsTaxableIncome.value, 0)
-
-  return Math.min(taxableIncome, calculatorConfig.massachusettsSurtaxFloor) * 0.05
-    + Math.max(taxableIncome - calculatorConfig.massachusettsSurtaxFloor, 0) * 0.09
-})
-
-const netInvestmentIncomeTax = computed(() => netInvestmentTaxableIncome.value * 0.038)
-
-const totalTax = computed(() =>
-  federalTax.value + stateTax.value + ficaTax.value + netInvestmentIncomeTax.value + longTermTax.value
-)
-
-const totalIncome = computed(() => {
-  const wageIncome = income.wageIncome ?? 0
-  const taxableBenefits = income.taxableBenefits ?? 0
-  const interestIncome = income.interestIncome ?? 0
-  const longTermCapitalGains = income.longTermCapitalGains ?? 0
-  const shortTermCapitalGains = income.shortTermCapitalGains ?? 0
-  const otherInvestmentIncome = income.otherInvestmentIncome ?? 0
-
-  return wageIncome
-    + taxableBenefits
-    + interestIncome
-    + longTermCapitalGains
-    + shortTermCapitalGains
-    + otherInvestmentIncome
-})
-
-const netIncome = computed(() => {
-  const retirement401kContributions = adjustments.retirement401kContributions ?? 0
-  const healthInsurancePayments = adjustments.healthInsurancePayments ?? 0
-  const taxableBenefits = income.taxableBenefits ?? 0
-
-  return totalIncome.value
-    - taxableBenefits
-    - retirement401kContributions
-    - hsaEmployeeContributionAmount.value
-    - healthInsurancePayments
-    - totalTax.value
-})
-
-const netIncomeMinusInvestmentIncome = computed(() => {
-  const interestIncome = income.interestIncome ?? 0
-  const longTermCapitalGains = income.longTermCapitalGains ?? 0
-  const shortTermCapitalGains = income.shortTermCapitalGains ?? 0
-  const otherInvestmentIncome = income.otherInvestmentIncome ?? 0
-
-  return netIncome.value
-    - shortTermCapitalGains
-    - longTermCapitalGains
-    - otherInvestmentIncome
-    - interestIncome
-})
-
-const effectiveTaxRate = computed(() => {
-  if (totalIncome.value <= 0) {
-    return 0
-  }
-
-  return totalTax.value / totalIncome.value
-})
-
-const calculateNetIncomeWithDeltas = (deltas: MarginalIncomeDeltas) => {
-  const wageIncome = (income.wageIncome ?? 0) + (deltas.wageIncome ?? 0)
-  const taxableBenefits = income.taxableBenefits ?? 0
-  const interestIncome = income.interestIncome ?? 0
-  const longTermCapitalGains = (income.longTermCapitalGains ?? 0) + (deltas.longTermCapitalGains ?? 0)
-  const shortTermCapitalGains = income.shortTermCapitalGains ?? 0
-  const otherInvestmentIncome = (income.otherInvestmentIncome ?? 0) + (deltas.otherInvestmentIncome ?? 0)
-  const retirement401kContributions = adjustments.retirement401kContributions ?? 0
-  const healthInsurancePayments = adjustments.healthInsurancePayments ?? 0
-  const investmentExpenses = optionalDeductions.investmentExpenses
-  const stateTaxesWithholding = optionalDeductions.stateTaxesWithholding
-  const propertyTaxes = optionalDeductions.propertyTaxes
-  const mortgageInterest = optionalDeductions.mortgageInterest
-  const massachusettsRent = optionalDeductions.massachusettsRent
-  const carryOverCapitalLoss = optionalDeductions.carryOverCapitalLoss
-  const hsaEmployeeContributions = hsaEmployeeContributionAmount.value
-  const grossIncomeAmount = wageIncome
-    + taxableBenefits
-    + interestIncome
-    + shortTermCapitalGains
-    + otherInvestmentIncome
-  const totalIncomeAmount = grossIncomeAmount + longTermCapitalGains
-  const stateAndPropertyTaxDeduction = Math.min(stateTaxesWithholding + propertyTaxes, 40000)
-  const itemizedOrStandardDeduction = Math.max(
-    calculatorConfig.federalStandardDeduction,
-    stateAndPropertyTaxDeduction + mortgageInterest
-  )
-  const capitalLossAfterGains = Math.max(
-    carryOverCapitalLoss - (longTermCapitalGains + shortTermCapitalGains),
-    0
-  )
-  const federalCapitalLossDeduction = Math.min(3000, capitalLossAfterGains)
-  const federalOrdinaryIncomeAmount = Math.max(grossIncomeAmount
-    - retirement401kContributions
-    - hsaEmployeeContributions
-    - investmentExpenses
-    - healthInsurancePayments
-    - itemizedOrStandardDeduction
-    - federalCapitalLossDeduction,
-  0)
-  const ficaTaxableIncome = Math.max(wageIncome
-    + taxableBenefits
-    - hsaEmployeeContributions
-    - healthInsurancePayments,
-  0)
-  const ficaTaxAmount = Math.min(
-    calculatorConfig.socialSecurityMaximumTaxableWage * 0.062,
-    0.062 * ficaTaxableIncome
-  ) + (0.0145 * ficaTaxableIncome) + (0.009 * Math.max(ficaTaxableIncome - 200000, 0))
-  const federalTaxAmount = calculateProgressiveTax(
-    federalOrdinaryIncomeAmount,
-    federalOrdinaryTaxBrackets.value
-  )
-  const longTermTaxRate = federalOrdinaryIncomeAmount <= longTermTaxZeroRateThreshold
-    ? 0
-    : federalOrdinaryIncomeAmount <= longTermTaxFifteenRateThreshold
-      ? 0.15
-      : 0.20
-  const longTermTaxAmount = longTermCapitalGains * longTermTaxRate
-  const interestCapitalLossDeduction = Math.min(
-    notStateTaxExemptInterest.value,
-    capitalLossAfterGains,
-    2000
-  )
-  const massachusettsTaxableIncomeAmount = Math.max(grossIncomeAmount
-    + longTermCapitalGains
-    - retirement401kContributions
-    - hsaEmployeeContributions
-    - healthInsurancePayments
-    - investmentExpenses
-    - Math.min(massachusettsRent, 3000)
-    - Math.min(ficaTaxAmount, 2000)
-    - massachusettsPersonalExemption
-    - interestCapitalLossDeduction
-    - stateTaxExemptInterest.value,
-  0)
-  const stateTaxAmount = Math.min(
-    Math.max(massachusettsTaxableIncomeAmount, 0),
-    calculatorConfig.massachusettsSurtaxFloor
-  ) * 0.05 + Math.max(massachusettsTaxableIncomeAmount - calculatorConfig.massachusettsSurtaxFloor, 0) * 0.09
-  const netInvestmentTaxableIncomeAmount = interestIncome
-    + otherInvestmentIncome
-    + longTermCapitalGains
-    + shortTermCapitalGains
-  const netInvestmentIncomeTaxAmount = netInvestmentTaxableIncomeAmount * 0.038
-  const totalTaxAmount = federalTaxAmount
-    + stateTaxAmount
-    + ficaTaxAmount
-    + netInvestmentIncomeTaxAmount
-    + longTermTaxAmount
-
-  return totalIncomeAmount
-    - taxableBenefits
-    - retirement401kContributions
-    - hsaEmployeeContributions
-    - healthInsurancePayments
-    - totalTaxAmount
-}
-
-const calculateMarginalTaxRate = (deltas: MarginalIncomeDeltas) => {
-  const incomeDelta = Object.values(deltas).reduce((total, delta) => total + (delta ?? 0), 0)
-
-  if (incomeDelta <= 0) {
-    return 0
-  }
-
-  const netIncomeDelta = calculateNetIncomeWithDeltas(deltas) - calculateNetIncomeWithDeltas({})
-
-  return 1 - netIncomeDelta / incomeDelta
-}
-
-const marginalTaxRateWageIncome = computed(() => calculateMarginalTaxRate({ wageIncome: 1 }))
-const marginalTaxRateInvestmentIncome = computed(() => calculateMarginalTaxRate({ otherInvestmentIncome: 1 }))
-const marginalTaxRateLongTermIncome = computed(() => calculateMarginalTaxRate({ longTermCapitalGains: 1 }))
 
 const exportInputs = () => {
   const data = {
@@ -1331,7 +1104,7 @@ const importInputs = async (event: Event) => {
                     Federal Ordinary Taxable Income
                   </dt>
                   <dd class="mt-1 text-xl font-semibold text-highlighted">
-                    {{ formatCurrency(federalOrdinaryIncome) }}
+                    {{ formatCurrency(calculationResults.federalOrdinaryIncome) }}
                   </dd>
                 </div>
 
@@ -1340,7 +1113,7 @@ const importInputs = async (event: Event) => {
                     FICA Taxable Income
                   </dt>
                   <dd class="mt-1 text-xl font-semibold text-highlighted">
-                    {{ formatCurrency(ficaWage) }}
+                    {{ formatCurrency(calculationResults.ficaWage) }}
                   </dd>
                 </div>
 
@@ -1349,7 +1122,7 @@ const importInputs = async (event: Event) => {
                     State Taxable Income
                   </dt>
                   <dd class="mt-1 text-xl font-semibold text-highlighted">
-                    {{ formatCurrency(massachusettsTaxableIncome) }}
+                    {{ formatCurrency(calculationResults.massachusettsTaxableIncome) }}
                   </dd>
                 </div>
 
@@ -1358,7 +1131,7 @@ const importInputs = async (event: Event) => {
                     Long Term Gains Taxable Income
                   </dt>
                   <dd class="mt-1 text-xl font-semibold text-highlighted">
-                    {{ formatCurrency(longTermTaxableIncome) }}
+                    {{ formatCurrency(calculationResults.longTermTaxableIncome) }}
                   </dd>
                 </div>
 
@@ -1367,7 +1140,7 @@ const importInputs = async (event: Event) => {
                     Net Investment Taxable Income
                   </dt>
                   <dd class="mt-1 text-xl font-semibold text-highlighted">
-                    {{ formatCurrency(netInvestmentTaxableIncome) }}
+                    {{ formatCurrency(calculationResults.netInvestmentTaxableIncome) }}
                   </dd>
                 </div>
               </dl>
@@ -1384,7 +1157,7 @@ const importInputs = async (event: Event) => {
                     Federal Tax
                   </dt>
                   <dd class="mt-1 text-xl font-semibold text-highlighted">
-                    {{ formatCurrency(federalTax) }}
+                    {{ formatCurrency(calculationResults.federalTax) }}
                   </dd>
                 </div>
 
@@ -1393,7 +1166,7 @@ const importInputs = async (event: Event) => {
                     FICA Tax
                   </dt>
                   <dd class="mt-1 text-xl font-semibold text-highlighted">
-                    {{ formatCurrency(ficaTax) }}
+                    {{ formatCurrency(calculationResults.ficaTax) }}
                   </dd>
                 </div>
 
@@ -1402,7 +1175,7 @@ const importInputs = async (event: Event) => {
                     State Tax
                   </dt>
                   <dd class="mt-1 text-xl font-semibold text-highlighted">
-                    {{ formatCurrency(stateTax) }}
+                    {{ formatCurrency(calculationResults.stateTax) }}
                   </dd>
                 </div>
 
@@ -1411,7 +1184,7 @@ const importInputs = async (event: Event) => {
                     Long Term Gains Tax
                   </dt>
                   <dd class="mt-1 text-xl font-semibold text-highlighted">
-                    {{ formatCurrency(longTermTax) }}
+                    {{ formatCurrency(calculationResults.longTermTax) }}
                   </dd>
                 </div>
 
@@ -1420,7 +1193,7 @@ const importInputs = async (event: Event) => {
                     Net Investment Income Tax
                   </dt>
                   <dd class="mt-1 text-xl font-semibold text-highlighted">
-                    {{ formatCurrency(netInvestmentIncomeTax) }}
+                    {{ formatCurrency(calculationResults.netInvestmentIncomeTax) }}
                   </dd>
                 </div>
 
@@ -1429,7 +1202,7 @@ const importInputs = async (event: Event) => {
                     Total Tax
                   </dt>
                   <dd class="mt-1 text-2xl font-semibold text-highlighted">
-                    {{ formatCurrency(totalTax) }}
+                    {{ formatCurrency(calculationResults.totalTax) }}
                   </dd>
                 </div>
               </dl>
@@ -1446,7 +1219,7 @@ const importInputs = async (event: Event) => {
                     401(k) (Employee)
                   </dt>
                   <dd class="mt-1 text-xl font-semibold text-highlighted">
-                    {{ formatCurrency(adjustments.retirement401kContributions ?? 0) }}
+                    {{ formatCurrency(calculationResults.retirement401kContributions) }}
                   </dd>
                 </div>
 
@@ -1455,7 +1228,7 @@ const importInputs = async (event: Event) => {
                     HSA Contributions (Employee)
                   </dt>
                   <dd class="mt-1 text-xl font-semibold text-highlighted">
-                    {{ formatCurrency(hsaEmployeeContributionAmount) }}
+                    {{ formatCurrency(calculationResults.hsaEmployeeContributionAmount) }}
                   </dd>
                 </div>
               </dl>
@@ -1468,11 +1241,21 @@ const importInputs = async (event: Event) => {
 
               <dl class="mt-3 space-y-4">
                 <div>
-                  <dt class="text-sm font-medium text-muted">
-                    Effective Tax Rate
+                  <dt class="flex items-center gap-1 text-sm font-medium text-muted">
+                    <span>Effective Tax Rate</span>
+                    <UTooltip text="Total tax as a percentage of all income, excluding taxable benefits.">
+                      <UButton
+                        icon="i-lucide-circle-help"
+                        color="neutral"
+                        variant="ghost"
+                        size="xs"
+                        class="size-5 p-0"
+                        aria-label="Effective Tax Rate description"
+                      />
+                    </UTooltip>
                   </dt>
                   <dd class="mt-1 text-xl font-semibold text-highlighted">
-                    {{ formatPercent(effectiveTaxRate) }}
+                    {{ formatPercent(calculationResults.effectiveTaxRate) }}
                   </dd>
                 </div>
 
@@ -1481,7 +1264,7 @@ const importInputs = async (event: Event) => {
                     Marginal Tax Rate (Wage Income)
                   </dt>
                   <dd class="mt-1 text-xl font-semibold text-highlighted">
-                    {{ formatPercent(marginalTaxRateWageIncome) }}
+                    {{ formatPercent(calculationResults.marginalTaxRateWageIncome) }}
                   </dd>
                 </div>
 
@@ -1490,7 +1273,7 @@ const importInputs = async (event: Event) => {
                     Marginal Tax Rate (Investment Income)
                   </dt>
                   <dd class="mt-1 text-xl font-semibold text-highlighted">
-                    {{ formatPercent(marginalTaxRateInvestmentIncome) }}
+                    {{ formatPercent(calculationResults.marginalTaxRateInvestmentIncome) }}
                   </dd>
                 </div>
 
@@ -1499,25 +1282,45 @@ const importInputs = async (event: Event) => {
                     Marginal Tax Rate (Long Term & Qualified Income)
                   </dt>
                   <dd class="mt-1 text-xl font-semibold text-highlighted">
-                    {{ formatPercent(marginalTaxRateLongTermIncome) }}
+                    {{ formatPercent(calculationResults.marginalTaxRateLongTermIncome) }}
                   </dd>
                 </div>
 
                 <div class="border-t border-default pt-4">
-                  <dt class="text-sm font-medium text-muted">
-                    Net Income
+                  <dt class="flex items-center gap-1 text-sm font-medium text-muted">
+                    <span>Net Income</span>
+                    <UTooltip text="All income minus taxable benefits, contributions, and health insurance.">
+                      <UButton
+                        icon="i-lucide-circle-help"
+                        color="neutral"
+                        variant="ghost"
+                        size="xs"
+                        class="size-5 p-0"
+                        aria-label="Net Income description"
+                      />
+                    </UTooltip>
                   </dt>
                   <dd class="mt-1 text-2xl font-semibold text-highlighted">
-                    {{ formatCurrency(netIncome) }}
+                    {{ formatCurrency(calculationResults.netIncome) }}
                   </dd>
                 </div>
 
                 <div>
-                  <dt class="text-sm font-medium text-muted">
-                    Net Income (minus Investment Income)
+                  <dt class="flex items-center gap-1 text-sm font-medium text-muted">
+                    <span>Net Wage Income</span>
+                    <UTooltip text="All income minus taxable benefits, contributions, health insurance, and (gross) investment income.">
+                      <UButton
+                        icon="i-lucide-circle-help"
+                        color="neutral"
+                        variant="ghost"
+                        size="xs"
+                        class="size-5 p-0"
+                        aria-label="Net Wage Income description"
+                      />
+                    </UTooltip>
                   </dt>
                   <dd class="mt-1 text-xl font-semibold text-highlighted">
-                    {{ formatCurrency(netIncomeMinusInvestmentIncome) }}
+                    {{ formatCurrency(calculationResults.netIncomeMinusInvestmentIncome) }}
                   </dd>
                 </div>
               </dl>
