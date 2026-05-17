@@ -1,4 +1,4 @@
-# Massachusetts Income Tax Calculator
+# Income Tax Calculator
 
 This project is a work-in-progress tax calculator for estimating US Federal and State Taxes.
 
