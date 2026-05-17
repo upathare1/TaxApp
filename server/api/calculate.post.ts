@@ -82,6 +82,10 @@ interface CoreCalculationResults {
 const massachusettsPersonalExemption = 4400
 const longTermTaxZeroRateThreshold = 49450
 const longTermTaxFifteenRateThreshold = 545500
+const baseSaltDeductionCap = 40400
+const minimumSaltDeductionCap = 10000
+const saltDeductionPhaseoutThreshold = 500000
+const saltDeductionPhaseoutRate = 0.30
 
 const defaultFederalTaxBrackets: ConfigTaxBracketPayload[] = [
   { from: 0, to: 12400, ratePercent: 10 },
@@ -114,6 +118,13 @@ const calculateProgressiveTax = (
     return tax + taxableInBracket * bracketRate
   }, 0)
 }
+
+const calculateSaltDeductionCap = (federalOrdinaryIncome: number) =>
+  Math.max(
+    baseSaltDeductionCap
+    - saltDeductionPhaseoutRate * Math.max(federalOrdinaryIncome - saltDeductionPhaseoutThreshold, 0),
+    minimumSaltDeductionCap
+  )
 
 const calculateCoreResults = (
   payload: CalculatePayload,
@@ -158,26 +169,49 @@ const calculateCoreResults = (
     + shortTermCapitalGains
     + otherInvestmentIncome
   const totalIncome = grossIncome + longTermCapitalGains
-  const stateAndPropertyTaxDeduction = Math.min(stateTaxesWithholding + propertyTaxes, 40000)
-  const itemizedOrStandardDeduction = Math.max(
-    federalStandardDeduction,
-    stateAndPropertyTaxDeduction + mortgageInterest
-  )
   const capitalLossAfterGains = Math.max(
     carryOverCapitalLoss - (longTermCapitalGains + shortTermCapitalGains),
     0
   )
   const federalCapitalLossDeduction = Math.min(3000, capitalLossAfterGains)
-  const federalOrdinaryIncome = Math.max(
-    grossIncome
-    - retirement401kContributions
-    - hsaEmployeeContributionAmount
-    - investmentExpenses
-    - healthInsurancePayments
-    - itemizedOrStandardDeduction
-    - federalCapitalLossDeduction,
-    0
-  )
+  const stateAndPropertyTaxesPaid = stateTaxesWithholding + propertyTaxes
+  const calculateFederalOrdinaryIncome = (saltDeductionCap: number) => {
+    const stateAndPropertyTaxDeduction = Math.min(stateAndPropertyTaxesPaid, saltDeductionCap)
+    const itemizedOrStandardDeduction = Math.max(
+      federalStandardDeduction,
+      stateAndPropertyTaxDeduction + mortgageInterest
+    )
+
+    return Math.max(
+      grossIncome
+      - retirement401kContributions
+      - hsaEmployeeContributionAmount
+      - investmentExpenses
+      - healthInsurancePayments
+      - itemizedOrStandardDeduction
+      - federalCapitalLossDeduction,
+      0
+    )
+  }
+  let saltDeductionCap = baseSaltDeductionCap
+  let federalOrdinaryIncome = calculateFederalOrdinaryIncome(saltDeductionCap)
+
+  for (let index = 0; index < 24; index += 1) {
+    const nextSaltDeductionCap = calculateSaltDeductionCap(federalOrdinaryIncome)
+    const nextFederalOrdinaryIncome = calculateFederalOrdinaryIncome(nextSaltDeductionCap)
+
+    if (
+      Math.abs(nextSaltDeductionCap - saltDeductionCap) < 0.000001
+      && Math.abs(nextFederalOrdinaryIncome - federalOrdinaryIncome) < 0.000001
+    ) {
+      saltDeductionCap = nextSaltDeductionCap
+      federalOrdinaryIncome = nextFederalOrdinaryIncome
+      break
+    }
+
+    saltDeductionCap = nextSaltDeductionCap
+    federalOrdinaryIncome = nextFederalOrdinaryIncome
+  }
   const longTermTaxableIncome = longTermCapitalGains
   const grossNetInvestmentIncome = interestIncome
     + otherInvestmentIncome
