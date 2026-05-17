@@ -34,3 +34,7 @@ http://localhost:3000
 ## Status
 
 This project is still under active development and APIs, workflows, and features may change frequently.
+
+## Disclaimer
+
+This calculator provides estimates for informational purposes only. Results are not guaranteed to be accurate or complete and should not be relied upon as tax, legal, or financial advice. Please consult a qualified tax professional before making filing or financial decisions.

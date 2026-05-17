@@ -548,7 +548,7 @@ const importInputs = async (event: Event) => {
         </h1>
 
         <p class="mt-3 text-base leading-7 text-muted">
-          To calculate your net income and state and federal taxes, enter income, contributions, and deductions amounts below. The tax calculator is built assuming a "Single" Filing Status for a full-year resident of the Commonwealth of Massachusetts.
+          To estimate your net income and state and federal taxes, enter income, contributions, and deductions amounts below. The tax calculator is built assuming a "Single" Filing Status for a full-year resident of the Commonwealth of Massachusetts.
         </p>
       </div>
     </div>
