@@ -258,6 +258,8 @@ const interestStateTaxExempt = ref<number | undefined>(undefined)
 const hsaEmployerContributions = ref<number | undefined>(undefined)
 const importInput = ref<HTMLInputElement | null>(null)
 const calculationError = ref<string | null>(null)
+const exportFileName = ref(`tax-calculator-inputs-${new Date().toISOString().slice(0, 10)}.json`)
+const exportDialogOpen = ref(false)
 const defaultCalculationResults: CalculationResults = {
   federalOrdinaryIncome: 0,
   ficaWage: 0,
@@ -386,6 +388,16 @@ const removeFederalTaxBracket = (index: number) => {
   calculatorConfig.federalTaxBrackets.splice(index, 1)
 }
 
+const normalizeJsonFileName = (fileName: string) => {
+  const trimmedFileName = fileName.trim()
+  const fallbackFileName = `tax-calculator-inputs-${new Date().toISOString().slice(0, 10)}`
+  const baseFileName = trimmedFileName || fallbackFileName
+
+  return baseFileName.toLowerCase().endsWith('.json')
+    ? baseFileName
+    : `${baseFileName}.json`
+}
+
 const optionalDeductionTotalPlaceholder = computed(() => {
   const mortgageInterest = optionalDeductions.mortgageInterest
   const propertyTaxes = optionalDeductions.propertyTaxes
@@ -506,9 +518,10 @@ const exportInputs = () => {
   const link = document.createElement('a')
 
   link.href = url
-  link.download = `tax-calculator-inputs-${new Date().toISOString().slice(0, 10)}.json`
+  link.download = normalizeJsonFileName(exportFileName.value)
   link.click()
   URL.revokeObjectURL(url)
+  exportDialogOpen.value = false
 }
 
 const importInputs = async (event: Event) => {
@@ -1118,7 +1131,7 @@ const importInputs = async (event: Event) => {
 
           <div class="mt-5 grid gap-3">
             <UButton
-              label="Import JSON"
+              label="Import Tax Inputs"
               icon="i-lucide-upload"
               color="neutral"
               variant="subtle"
@@ -1127,12 +1140,12 @@ const importInputs = async (event: Event) => {
             />
 
             <UButton
-              label="Export JSON"
+              label="Export Tax Inputs"
               icon="i-lucide-download"
               color="primary"
               variant="solid"
               block
-              @click="exportInputs"
+              @click="exportDialogOpen = true"
             />
           </div>
 
@@ -1143,6 +1156,51 @@ const importInputs = async (event: Event) => {
             class="hidden"
             @change="importInputs"
           >
+
+          <UModal
+            v-model:open="exportDialogOpen"
+            title="Export Tax Inputs"
+            description="Choose a JSON file name for this calculator export."
+          >
+            <template #body>
+              <form
+                id="export-tax-inputs-form"
+                @submit.prevent="exportInputs"
+              >
+                <UFormField
+                  label="File name"
+                  name="exportFileName"
+                >
+                  <UInput
+                    v-model="exportFileName"
+                    type="text"
+                    icon="i-lucide-file-json"
+                    placeholder="tax-calculator-inputs.json"
+                    autofocus
+                    class="w-full"
+                  />
+                </UFormField>
+              </form>
+            </template>
+
+            <template #footer="{ close }">
+              <div class="flex w-full justify-end gap-2">
+                <UButton
+                  label="Cancel"
+                  color="neutral"
+                  variant="ghost"
+                  @click="close"
+                />
+                <UButton
+                  label="Export Tax Inputs"
+                  icon="i-lucide-download"
+                  color="primary"
+                  type="submit"
+                  form="export-tax-inputs-form"
+                />
+              </div>
+            </template>
+          </UModal>
         </section>
 
         <section class="rounded-lg border border-default bg-default p-5">
