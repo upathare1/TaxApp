@@ -173,8 +173,8 @@ const optionalDeductionInputs: OptionalDeductionInput[] = [
   },
   {
     key: 'stateTaxesWithholding',
-    label: 'State Taxes Withholding',
-    description: 'State income taxes withheld during the tax year.',
+    label: 'State Tax Withholding',
+    description: 'Automatically tracks calculated state tax, but can be edited manually.',
     icon: 'i-lucide-file-minus'
   },
   {
@@ -421,12 +421,35 @@ const calculationPayload = computed<CalculationPayload>(() => ({
   }
 }))
 
+const stateTaxInputSignature = computed(() => JSON.stringify({
+  taxState: selectedState.value,
+  income: { ...income },
+  adjustments: { ...adjustments },
+  deductions: {
+    mortgageInterest: optionalDeductions.mortgageInterest,
+    investmentExpenses: optionalDeductions.investmentExpenses,
+    massachusettsRent: optionalDeductions.massachusettsRent,
+    carryOverCapitalLoss: optionalDeductions.carryOverCapitalLoss
+  },
+  interestBreakdown: {
+    stateTaxExempt: stateTaxExemptInterest.value,
+    notStateTaxExempt: notStateTaxExemptInterest.value
+  },
+  hsaEmployeeContributions: hsaEmployeeContributionAmount.value,
+  stateConfig: {
+    massachusettsSurtaxFloor: calculatorConfig.massachusettsSurtaxFloor,
+    socialSecurityMaximumTaxableWage: calculatorConfig.socialSecurityMaximumTaxableWage
+  }
+}))
+
 let calculationRequestId = 0
+let lastAutoWithholdingSignature = ''
 
 watch(
   calculationPayload,
   async (payload) => {
     const requestId = ++calculationRequestId
+    const requestedStateTaxSignature = stateTaxInputSignature.value
 
     try {
       const results = await $fetch<CalculationResults>('/api/calculate', {
@@ -437,6 +460,11 @@ watch(
       if (requestId === calculationRequestId) {
         calculationResults.value = results
         calculationError.value = null
+
+        if (requestedStateTaxSignature !== lastAutoWithholdingSignature) {
+          lastAutoWithholdingSignature = requestedStateTaxSignature
+          optionalDeductions.stateTaxesWithholding = Math.round(results.stateTax * 100) / 100
+        }
       }
     } catch (error) {
       if (requestId === calculationRequestId) {
