@@ -11,8 +11,8 @@ useHead({
   }
 })
 
-const title = 'Income Tax Calculator (Massachusetts)'
-const description = 'Estimate net income and state and federal taxes for a single full-year Massachusetts resident.'
+const title = 'Income Tax Calculator'
+const description = 'Estimate net income and state and federal taxes for single filers in Massachusetts and California.'
 
 useSeoMeta({
   title,
@@ -34,7 +34,7 @@ useSeoMeta({
                 name="i-lucide-calculator"
                 class="size-5 text-primary"
               />
-              Income Tax Calculator (Massachusetts)
+              Income Tax Calculator
             </span>
           </NuxtLink>
         </template>

@@ -7,7 +7,7 @@ This project is a work-in-progress tax calculator for estimating US Federal and 
 At the moment, the application supports:
 
 * Single filers only
-* State Taxes for Massachusetts
+* State taxes for Massachusetts and California
 
 Support for additional filing statuses and states is planned for future releases.
 

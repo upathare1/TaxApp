@@ -20,6 +20,8 @@ type OptionalDeductionKey
     | 'massachusettsRent'
     | 'carryOverCapitalLoss'
 
+type TaxState = 'MA' | 'CA'
+
 interface IncomeInput {
   key: IncomeKey
   label: string
@@ -58,6 +60,7 @@ interface CalculatorConfig {
 type NumberInputValue = string | number
 
 interface CalculationPayload {
+  taxState: TaxState
   income: Record<IncomeKey, number | undefined>
   adjustments: Record<AdjustmentKey, number | undefined>
   optionalDeductions: Record<OptionalDeductionKey, number>
@@ -75,7 +78,7 @@ interface CalculationPayload {
 interface CalculationResults {
   federalOrdinaryIncome: number
   ficaWage: number
-  massachusettsTaxableIncome: number
+  stateTaxableIncome: number
   longTermTaxableIncome: number
   netInvestmentTaxableIncome: number
   federalTax: number
@@ -194,6 +197,11 @@ const optionalDeductionInputs: OptionalDeductionInput[] = [
   }
 ]
 
+const stateOptions = [
+  { label: 'Massachusetts', value: 'MA' },
+  { label: 'California', value: 'CA' }
+]
+
 const defaultCalculatorConfig: CalculatorConfig = {
   federalStandardDeduction: 16100,
   massachusettsSurtaxFloor: 1107750,
@@ -240,6 +248,8 @@ const calculatorConfig = reactive<CalculatorConfig>({
   federalTaxBrackets: defaultCalculatorConfig.federalTaxBrackets.map(bracket => ({ ...bracket }))
 })
 
+const selectedState = ref<TaxState>('MA')
+const selectedStateName = computed(() => selectedState.value === 'CA' ? 'California' : 'Massachusetts')
 const interestBreakdownExpanded = ref(false)
 const hsaBreakdownExpanded = ref(false)
 const optionalDeductionsExpanded = ref(false)
@@ -251,7 +261,7 @@ const calculationError = ref<string | null>(null)
 const defaultCalculationResults: CalculationResults = {
   federalOrdinaryIncome: 0,
   ficaWage: 0,
-  massachusettsTaxableIncome: 0,
+  stateTaxableIncome: 0,
   longTermTaxableIncome: 0,
   netInvestmentTaxableIncome: 0,
   federalTax: 0,
@@ -385,10 +395,13 @@ const optionalDeductionTotalPlaceholder = computed(() => {
   const carryOverCapitalLoss = optionalDeductions.carryOverCapitalLoss
 
   // TODO: Replace with your actual optional deduction formula.
-  return mortgageInterest + propertyTaxes + stateTaxesWithholding + investmentExpenses + massachusettsRent + carryOverCapitalLoss
+  const applicableRent = selectedState.value === 'MA' ? massachusettsRent : 0
+
+  return mortgageInterest + propertyTaxes + stateTaxesWithholding + investmentExpenses + applicableRent + carryOverCapitalLoss
 })
 
 const calculationPayload = computed<CalculationPayload>(() => ({
+  taxState: selectedState.value,
   income: { ...income },
   adjustments: { ...adjustments },
   optionalDeductions: { ...optionalDeductions },
@@ -438,8 +451,9 @@ watch(
 
 const exportInputs = () => {
   const data = {
-    version: 1,
+    version: 2,
     exportedAt: new Date().toISOString(),
+    taxState: selectedState.value,
     income: { ...income },
     adjustments: { ...adjustments },
     optionalDeductions: { ...optionalDeductions },
@@ -479,6 +493,7 @@ const importInputs = async (event: Event) => {
 
   try {
     const importedData = JSON.parse(await file.text()) as {
+      taxState?: TaxState
       income?: Partial<Record<IncomeKey, number>>
       adjustments?: Partial<Record<AdjustmentKey, number>>
       optionalDeductions?: Partial<Record<OptionalDeductionKey, number>>
@@ -492,6 +507,8 @@ const importInputs = async (event: Event) => {
         employerContributions?: number
       }
     }
+
+    selectedState.value = importedData.taxState === 'CA' ? 'CA' : 'MA'
 
     for (const input of incomeInputs) {
       income[input.key] = importedData.income?.[input.key]
@@ -541,16 +558,31 @@ const importInputs = async (event: Event) => {
 
 <template>
   <UContainer class="py-8 sm:py-10">
-    <div class="mb-8">
+    <div class="mb-8 flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
       <div class="max-w-4xl">
         <h1 class="text-3xl font-semibold tracking-normal text-highlighted sm:text-4xl">
-          Income Tax Calculator (Massachusetts)
+          Income Tax Calculator
         </h1>
 
         <p class="mt-3 text-base leading-7 text-muted">
-          To estimate your net income and state and federal taxes, enter income, contributions, and deductions amounts below. The tax calculator is built assuming a "Single" Filing Status for a full-year resident of the Commonwealth of Massachusetts.
+          To estimate your net income and state and federal taxes, enter income, contributions, and deductions amounts below. The tax calculator assumes a "Single" filing status for a full-year resident of {{ selectedStateName }}.
         </p>
       </div>
+
+      <UFormField
+        label="State of residence"
+        name="taxState"
+        class="w-full shrink-0 sm:w-56"
+      >
+        <USelect
+          v-model="selectedState"
+          :items="stateOptions"
+          value-key="value"
+          size="xl"
+          class="w-full"
+          aria-label="State of residence"
+        />
+      </UFormField>
     </div>
 
     <div class="grid gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
@@ -630,7 +662,7 @@ const importInputs = async (event: Event) => {
                   class="mt-3 grid gap-3 rounded-lg border border-default bg-muted/30 p-4 sm:grid-cols-2"
                 >
                   <UFormField
-                    label="State Tax Exempt"
+                    :label="`${selectedStateName} Tax Exempt`"
                     name="stateTaxExemptInterest"
                   >
                     <UInput
@@ -648,7 +680,7 @@ const importInputs = async (event: Event) => {
                   </UFormField>
 
                   <UFormField
-                    label="Not State Tax Exempt"
+                    :label="`Not ${selectedStateName} Tax Exempt`"
                     name="notStateTaxExemptInterest"
                   >
                     <UInput
@@ -809,45 +841,49 @@ const importInputs = async (event: Event) => {
             v-if="optionalDeductionsExpanded"
             class="divide-y divide-default"
           >
-            <div
+            <template
               v-for="input in optionalDeductionInputs"
               :key="input.key"
-              class="grid gap-4 px-5 py-5 sm:grid-cols-[1fr_240px] sm:items-center sm:px-6"
             >
-              <div class="flex gap-3">
-                <div class="flex size-10 shrink-0 items-center justify-center rounded-md bg-warning/10 text-warning">
-                  <UIcon
-                    :name="input.icon"
-                    class="size-5"
-                  />
+              <div
+                v-if="input.key !== 'massachusettsRent' || selectedState === 'MA'"
+                class="grid gap-4 px-5 py-5 sm:grid-cols-[1fr_240px] sm:items-center sm:px-6"
+              >
+                <div class="flex gap-3">
+                  <div class="flex size-10 shrink-0 items-center justify-center rounded-md bg-warning/10 text-warning">
+                    <UIcon
+                      :name="input.icon"
+                      class="size-5"
+                    />
+                  </div>
+
+                  <div>
+                    <UFormField
+                      :label="input.label"
+                      :name="input.key"
+                      class="[&>label]:text-base [&>label]:font-semibold"
+                    >
+                      <p class="mt-1 text-sm leading-6 text-muted">
+                        {{ input.description }}
+                      </p>
+                    </UFormField>
+                  </div>
                 </div>
 
-                <div>
-                  <UFormField
-                    :label="input.label"
-                    :name="input.key"
-                    class="[&>label]:text-base [&>label]:font-semibold"
-                  >
-                    <p class="mt-1 text-sm leading-6 text-muted">
-                      {{ input.description }}
-                    </p>
-                  </UFormField>
-                </div>
+                <UInput
+                  :model-value="formatNumberInput(optionalDeductions[input.key])"
+                  type="text"
+                  :min="0"
+                  :step="100"
+                  inputmode="decimal"
+                  placeholder="0"
+                  icon="i-lucide-dollar-sign"
+                  size="xl"
+                  class="w-full"
+                  @update:model-value="optionalDeductions[input.key] = parseNumberInput($event)"
+                />
               </div>
-
-              <UInput
-                :model-value="formatNumberInput(optionalDeductions[input.key])"
-                type="text"
-                :min="0"
-                :step="100"
-                inputmode="decimal"
-                placeholder="0"
-                icon="i-lucide-dollar-sign"
-                size="xl"
-                class="w-full"
-                @update:model-value="optionalDeductions[input.key] = parseNumberInput($event)"
-              />
-            </div>
+            </template>
           </div>
         </section>
 
@@ -862,7 +898,7 @@ const importInputs = async (event: Event) => {
                 Advanced Configurations
               </span>
               <span class="mt-1 block text-sm text-muted">
-                Federal brackets, standard deduction, Massachusetts surtax floor, and Social Security wage base
+                Federal brackets, standard deduction, Social Security wage base<span v-if="selectedState === 'MA'">, and Massachusetts surtax floor</span>
               </span>
             </span>
 
@@ -895,6 +931,7 @@ const importInputs = async (event: Event) => {
               </UFormField>
 
               <UFormField
+                v-if="selectedState === 'MA'"
                 label="Massachusetts Surtax Floor"
                 name="massachusettsSurtaxFloor"
                 class="[&>label]:flex [&>label]:min-h-10 [&>label]:items-end"
@@ -1122,7 +1159,7 @@ const importInputs = async (event: Event) => {
                     State Taxable Income
                   </dt>
                   <dd class="mt-1 text-xl font-semibold text-highlighted">
-                    {{ formatCurrency(calculationResults.massachusettsTaxableIncome) }}
+                    {{ formatCurrency(calculationResults.stateTaxableIncome) }}
                   </dd>
                 </div>
 
