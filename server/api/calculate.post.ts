@@ -237,6 +237,7 @@ const calculateCoreResults = (
     + otherInvestmentIncome
     + longTermCapitalGains
     + shortTermCapitalGains
+  const netInvestmentIncome = Math.max(grossNetInvestmentIncome - investmentExpenses, 0)
   const ficaWage = Math.max(
     wageIncome + taxableBenefits - hsaEmployeeContributionAmount - healthInsurancePayments,
     0
@@ -306,7 +307,7 @@ const calculateCoreResults = (
     + shortTermCapitalGains
     + otherInvestmentIncome
   const netInvestmentTaxableIncome = Math.min(
-    grossNetInvestmentIncome,
+    netInvestmentIncome,
     Math.max(netInvestmentThresholdIncome - 200000, 0)
   )
   const netInvestmentIncomeTax = netInvestmentTaxableIncome * 0.038

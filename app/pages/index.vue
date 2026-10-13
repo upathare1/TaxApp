@@ -41,6 +41,7 @@ interface OptionalDeductionInput {
   key: OptionalDeductionKey
   label: string
   description: string
+  tooltip?: string
   icon: string
 }
 
@@ -179,8 +180,9 @@ const optionalDeductionInputs: OptionalDeductionInput[] = [
   },
   {
     key: 'investmentExpenses',
-    label: 'Investment Expenses',
+    label: 'Eligible Investment Expenses',
     description: 'Eligible investment-related expenses for the tax year.',
+    tooltip: 'Enter only the deductible amount after applicable limits. Eligible investment interest (such as margin interest, subject to itemization and limits) and qualifying rental expenses can reduce taxable income and net investment income. Investment advisory, management, and custodial fees generally cannot.',
     icon: 'i-lucide-receipt-text'
   },
   {
@@ -904,6 +906,28 @@ const importInputs = async (event: Event) => {
                       :name="input.key"
                       class="[&>label]:text-base [&>label]:font-semibold"
                     >
+                      <template #label>
+                        <span class="inline-flex items-center gap-1">
+                          {{ input.label }}
+                          <UTooltip
+                            v-if="input.tooltip"
+                            :text="input.tooltip"
+                            :ui="{
+                              content: 'max-w-[min(20rem,calc(100vw-2rem))] h-auto',
+                              text: 'whitespace-normal overflow-visible text-clip break-words'
+                            }"
+                          >
+                            <UButton
+                              icon="i-lucide-circle-help"
+                              color="neutral"
+                              variant="ghost"
+                              size="xs"
+                              class="size-5 shrink-0 p-0"
+                              :aria-label="`${input.label} description`"
+                            />
+                          </UTooltip>
+                        </span>
+                      </template>
                       <p class="mt-1 text-sm leading-6 text-muted">
                         {{ input.description }}
                       </p>
